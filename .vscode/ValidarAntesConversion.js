@@ -1,0 +1,4 @@
+let valor=pront("ingresa un valor")
+
+if(isNaN(valor))
+let numero=Number(valor)

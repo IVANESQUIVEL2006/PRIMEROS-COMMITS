@@ -1,0 +1,100 @@
+# Decorador para indicar qué método se está ejecutando
+def mostrar_ejecucion(funcion):
+    # el args permite recibir cualquier agumento de numeros pocisionales
+    # ejempo :  f(1, 2, 3) se guarda como (1, 2, 3).
+    # el kwargs permite recibir cualquier tipo de argumento nombrado
+    # Ejemplo: f(a=1, b=2) se guarda como {'a': 1, 'b': 2}.
+    def envoltura(*args, **kwargs):
+        # insertamos variables dento de un texto
+        print(f"\nEjecutando método: {funcion.__name__}")
+        return funcion(*args, **kwargs)
+    return envoltura
+
+
+class EjerciciosPOO:
+    # Conversión de entero a número romano
+    @mostrar_ejecucion
+    def entero_a_romano(self, numero):
+        valores = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+        simbolos = ["M", "CM", "D", "CD", "C", "XC", "L",
+                    "XL", "X", "IX", "V", "IV", "I"]
+        resultado = ""
+        i = 0
+        while numero > 0:
+            for _ in range(numero // valores[i]):
+                resultado += simbolos[i]
+                numero -= valores[i]
+            i += 1
+        return resultado
+
+    # Conversión de número romano a entero
+    @mostrar_ejecucion
+    def romano_a_entero(self, romano):
+        valores = {"I": 1, "V": 5, "X": 10, "L": 50,
+                   "C": 100, "D": 500, "M": 1000}
+        total = 0
+        prev = 0
+        for letra in romano[::-1]:
+            valor = valores[letra]
+            if valor < prev:
+                total -= valor
+            else:
+                total += valor
+            prev = valor
+        return total
+
+    # Validación de paréntesis
+    @mostrar_ejecucion
+    def validar_parentesis(self, cadena):
+        pila = []
+        pares = {')': '(', '}': '{', ']': '['}
+        for caracter in cadena:
+            if caracter in "({[":
+                pila.append(caracter)
+            elif caracter in ")}]":
+                if not pila or pila[-1] != pares[caracter]:
+                    return False
+                pila.pop()
+        return len(pila) == 0
+
+    # Subconjuntos únicos de un conjunto de enteros
+    @mostrar_ejecucion
+    def obtener_subconjuntos(self, nums):
+        subconjuntos = [[]]
+        for num in nums:
+            subconjuntos += [s + [num] for s in subconjuntos]
+        return subconjuntos
+
+    # Números divisibles por 2, 3 y 5
+    @mostrar_ejecucion
+    def divisibilidad(self, numeros):
+        resultados = {}
+        for n in numeros:
+            resultados[n] = {
+                "Divisible por 2": n % 2 == 0,
+                "Divisible por 3": n % 3 == 0,
+                "Divisible por 5": n % 5 == 0
+            }
+        return resultados
+
+
+
+ejercicios = EjerciciosPOO()
+
+# 1. Entero a romano
+print(ejercicios.entero_a_romano(29))  # XXIX
+
+# 2. Romano a entero
+print(ejercicios.romano_a_entero("XXIX"))  # 29
+
+# 3. Validación de paréntesis
+print(ejercicios.validar_parentesis("()[]{}"))  # True
+print(ejercicios.validar_parentesis("({[)]"))   # False
+
+# 4. Subconjuntos de [4,5,6]
+print(ejercicios.obtener_subconjuntos([4, 5, 6]))
+
+# 5. Divisibilidad de 5 números mayores a 10
+numeros = [12, 15, 20, 23, 30]
+print(ejercicios.divisibilidad(numeros))
+

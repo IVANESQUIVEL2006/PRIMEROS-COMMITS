@@ -1,0 +1,8 @@
+def convertir_velocidad(velocidad_m_s):
+    return velocidad_m_s * 3.6
+
+# Solicita al usuario que ingrese una velocidad en m/s
+velocidad_m_s = float(input("Ingresa la velocidad en metros por segundo (m/s): "))
+velocidad_kmh = convertir_velocidad(velocidad_m_s)
+print(f"{velocidad_m_s} m/s es igual a {velocidad_kmh} km/h")
+
