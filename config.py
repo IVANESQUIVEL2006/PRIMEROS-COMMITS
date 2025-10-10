@@ -1,26 +1,51 @@
-import os
-import csv
 import serial 
 import time   
 import re     
+import os
+import sys
+import pandas as pd # 👈 NUEVA LIBRERÍA
+from typing import Dict, Any, List
 
 # ==========================================================
-# 1. EXPRESIONES REGULARES (REGEX)
+# 1. FUNCIÓN DE LECTURA DE DATOS DEL ROUTER
 # ==========================================================
-REGEX_VERSION = re.compile(r"Version\s*[:]\s*([0-9A-Za-z\.\(\)\-_,]+)", re.IGNORECASE)
-REGEX_SERIAL = re.compile(r"(?:System serial number|Processor board ID)\s*:\s*(\S+)", re.IGNORECASE)
+def leer_datos_router_desde_excel(archivo_excel="routers.xlsx") -> List[Dict[str, Any]]:
+    """
+    Lee los datos de los routers desde un archivo de Excel (routers.xlsx).
+    Retorna una lista de diccionarios, donde cada diccionario es un router.
+    """
+    if not os.path.exists(archivo_excel):
+        print(f"❌ ERROR: Archivo '{archivo_excel}' no encontrado.")
+        print("Cree un archivo de Excel con las columnas: Port, CLAVE_ENABLE, USER_CONSOLA, etc.")
+        sys.exit(1)
+        
+    print(f"📄 Leyendo datos desde '{archivo_excel}'...")
+    try:
+        # Lee la primera hoja del archivo Excel
+        df = pd.read_excel(archivo_excel)
+        
+        # Convierte el DataFrame a una lista de diccionarios
+        datos_routers = df.to_dict('records')
+        print(f"✅ Se cargaron {len(datos_routers)} routers.")
+        return datos_routers
+        
+    except Exception as e:
+        print(f"⚠️ Error al leer el archivo Excel: {e}")
+        sys.exit(1)
 
 # ==========================================================
-# 2. FUNCIONES DE COMUNICACIÓN Y EXTRACCIÓN (REALES)
+# 2. FUNCIONES DE COMUNICACIÓN (MISMAS QUE TENÍAS)
 # ==========================================================
-
-def read_until_idle(ser, idle_timeout=1.2, overall_timeout=10):
-    """Lee datos del puerto serial hasta que el dispositivo deja de enviar."""
+# ... (Mantener 'read_until_idle', 'send_command', 'conectar_router' y 'modo_interactivo' tal cual) ...
+def read_until_idle(ser, idle_timeout=2.0, overall_timeout=15):
+    """Lee datos del puerto serial hasta que se detecta el prompt o inactividad."""
+    # ... (cuerpo de la función) ...
     buf = bytearray()
     start = time.time()
     last = time.time()
+    
     ser.write(b'\r\n')
-    time.sleep(0.5)
+    time.sleep(0.3) 
 
     while True:
         chunk = ser.read(1024)
@@ -29,18 +54,17 @@ def read_until_idle(ser, idle_timeout=1.2, overall_timeout=10):
             last = time.time()
             if b'--More--' in chunk:
                 ser.write(b' ')
-                time.sleep(0.2)
-            # Detecta el fin de la salida por el prompt
-            if buf.endswith(b'>') or buf.endswith(b'#') or buf.endswith(b'Username:'):
+                time.sleep(0.5)
+            if buf.endswith(b'#') or buf.endswith(b'>') or b'Password:' in buf or b'password:' in buf or b'Username:' in buf:
                 break
         else:
             if time.time() - last > idle_timeout: break
             if time.time() - start > overall_timeout: break
-            time.sleep(0.05)
+            time.sleep(0.1)
             
     return buf.decode(errors="ignore")
 
-def send_command(ser, cmd, espera=0.3):
+def send_command(ser, cmd, espera=1.0):
     """Envía comandos reales al dispositivo."""
     ser.write((cmd + "\r\n").encode())
     time.sleep(espera)
@@ -57,156 +81,147 @@ def conectar_router(port, baudrate=9600):
         print(f"🔗 Conexión exitosa a {port}.")
         return ser
     except serial.SerialException as e:
-        print(f"❌ No se pudo abrir {port}: Verifica si el puerto está libre o el nombre es correcto. Error: {e}")
+        print(f"❌ No se pudo abrir {port}: Verifica si el puerto está libre. Error: {e}")
         return None
     except Exception as e:
         print(f"⚠️ Error desconocido al conectar a {port}: {e}")
         return None
 
-def extraer_datos(salida):
-    """Extrae el Modelo, Versión y Serial usando las REGEX."""
-    modelo_match = re.search(r"Cisco\s*([A-Z0-9\-]+)", salida)
-    modelo = modelo_match.group(1).strip() if modelo_match else "DESCONOCIDO_MODELO"
-    m_ver = REGEX_VERSION.search(salida)
-    version = m_ver.group(1).strip() if m_ver else "DESCONOCIDA"
-    m_ser = REGEX_SERIAL.search(salida)
-    serial = m_ser.group(1).strip() if m_ser else "NODETECTADO"
-    return modelo, version, serial
-
-
-# ==========================================================
-# 3. FUNCIÓN DE CONFIGURACIÓN
-# ==========================================================
-def configurar_dispositivo(ser, fila):
-    """Aplica la configuración básica al dispositivo usando los datos del CSV (fila)."""
-    DEVICE = fila.get("Device", "Router-Default")
-    USER = fila.get("User", "cisco")
-    PASSWORD = fila.get("Password", "cisco")
-    IP_DOMAIN = fila.get("Ip-domain", "cisco.local")
-
-    print(f"⚙️ Iniciando configuración para {DEVICE}...")
-
-    send_command(ser, "enable") 
-    send_command(ser, "configure terminal")
-    send_command(ser, f"hostname {DEVICE}")
-    send_command(ser, f"username {USER} privilege 15 secret {PASSWORD}")
-    send_command(ser, f"ip domain name {IP_DOMAIN}")
-    send_command(ser, "service password-encryption")
-
-    send_command(ser, "end")
-    send_command(ser, "write memory", espera=5) 
+# Definición de 'modo_interactivo' (debe estar en el script)
+def modo_interactivo(ser: serial.Serial):
+    """
+    Toma el control de la terminal para que el usuario escriba comandos.
+    Se detiene cuando el usuario escribe 'exit'.
+    """
+    print("\n=======================================================")
+    print("✅ MODO INTERACTIVO ACTIVO.")
+    print("   Ahora puedes escribir comandos directamente al router.")
+    print("   Cuando termines, escribe 'exit' para cerrar la conexión.")
+    print("=======================================================")
     
-    print(f"✔️ Configuración de Hostname y credenciales aplicada.")
-    print(f"💾 Dispositivo guardado.")
+    # Bucle para capturar la entrada del usuario y enviarla al router
+    while True:
+        try:
+            # Muestra un prompt limpio para la entrada
+            comando = input("CMD> ") 
+            
+            if comando.lower() == 'exit':
+                break
+            
+            if not comando:
+                continue
+
+            # Envía el comando al router
+            salida = send_command(ser, comando, espera=1.5)
+            
+            # Imprime la respuesta del router directamente
+            print(salida.strip())
+            
+        except KeyboardInterrupt:
+            # Permite salir con Ctrl+C
+            break
+        except Exception as e:
+            print(f"\n[Error de comunicación]: {e}")
+            break
+
+
+# ==========================================================
+# 3. FUNCIÓN PRINCIPAL DE AUTENTICACIÓN (MISMA QUE TENÍAS)
+# ==========================================================
+def autenticar(ser: serial.Serial, datos: Dict[str, str]):
+    """Maneja la autenticación y pone el router en modo privilegiado (#)."""
+    
+    CLAVE_ENABLE = str(datos.get("CLAVE_ENABLE", "Cisco")) # Usamos .get y str() por si viene None de Excel
+    USER_CONSOLA = str(datos.get("USER_CONSOLA", "cisco")) # Usamos .get y str() por si viene None de Excel
+    
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+
+    # 1. Secuencia de escape y ENTERs (Salida del diálogo de configuración inicial)
+    send_command(ser, "\r\n") 
+    send_command(ser, "no", espera=1.5) 
+    send_command(ser, "\r\n") 
+    
+    # 2. Lógica de Autenticación de CONSOLA/VTY (Si pide Username/Password)
+    
+    # Intento 1: Enviar USUARIO (si el prompt es 'Username:')
+    salida_prompt = send_command(ser, USER_CONSOLA, espera=1.5)
+    
+    # Intento 2: Enviar CLAVE (Si el prompt es 'Password:' o falló el user)
+    if "Password:" in salida_prompt or "password:" in salida_prompt:
+        send_command(ser, CLAVE_ENABLE, espera=1.5) # Enviamos la clave de consola
+        
+    # 3. Entrar a modo privilegiado (ENABLE)
+    salida_enable = send_command(ser, "enable", espera=2.5) 
+    
+    # 4. Enviar CLAVE DE ENABLE si el router lo pide (Re-autenticación)
+    if "Password:" in salida_enable or "password:" in salida_enable:
+          print(f"🔑 Enviando clave de ENABLE: {CLAVE_ENABLE}")
+          salida_autenticacion = send_command(ser, CLAVE_ENABLE, espera=3.0) 
+          
+          if "Invalid" in salida_autenticacion or "login failed" in salida_autenticacion:
+              print("❌ ERROR: Clave 'ENABLE' rechazada. ¡Verifica la clave!")
+              raise Exception("Autenticación ENABLE fallida.")
+    
+    # 5. Desactiva paginación para la sesión manual
     send_command(ser, "terminal length 0")
 
 
 # ==========================================================
-# 4. FUNCIÓN PRINCIPAL (MAIN FUNCTION)
+# 4. FUNCIÓN PRINCIPAL (MODIFICADA PARA EXCEL)
 # ==========================================================
-def procesar_csv(ruta_csv, ruta_resultados="routers_resultados.csv"):
+def procesar_routers_desde_excel(archivo_excel="routers.xlsx"):
+    """
+    Función principal que itera sobre los routers leídos del Excel.
+    """
+    routers_a_procesar = leer_datos_router_desde_excel(archivo_excel)
     
-    # 💥 BLOQUE DE AUTOCREACIÓN DEL CSV 💥
-    if not os.path.exists(ruta_csv):
-        print(f"❌ El archivo '{ruta_csv}' no se encuentra. Creando plantilla de ejemplo...")
-        try:
-            with open(ruta_csv, 'w', newline="", encoding="utf-8") as f:
-                campos = ["Serie", "Port", "Device", "User", "Password", "Ip-domain", "Modelo", "Version"]
-                writer = csv.DictWriter(f, fieldnames=campos)
-                writer.writeheader()
-                
-                # --- DATOS DE PLANTILLA ---
-                writer.writerow({
-                    "Serie": "REEMPLAZAR_CON_SERIAL_REAL", 
-                    "Port": "COM3", 
-                    "Device": "RTR-LAB-A",
-                    "User": "admin",
-                    "Password": "MiPassword123",
-                    "Ip-domain": "practica.net",
-                    "Modelo": "Cisco 1841", 
-                    "Version": "12.4(24)T" 
-                })
-            print(f"✅ Archivo '{ruta_csv}' creado con datos de ejemplo.")
-            print("🛑 AHORA: Edita ese archivo con los datos REALES de tu router (Serial, Port, Modelo) y vuelve a ejecutar.")
-        except Exception as e:
-             print(f"⚠️ Error al crear archivo CSV: {e}")
+    # NOTA: Este script solo procesa el PRIMER router en el Excel 
+    # y entra en modo interactivo, imitando la lógica original.
+    # Si quieres procesar TODOS, necesitarías cambiar 'modo_interactivo' 
+    # por un conjunto de comandos automatizados (como 'show version').
+    
+    if not routers_a_procesar:
+        print("No hay routers para procesar.")
+        return
+    
+    datos_router = routers_a_procesar[0] # Tomamos solo el primer router
+    port = str(datos_router.get("Port")) # Aseguramos que sea string
+
+    if not port:
+         print("❌ Error: La columna 'Port' no está definida para el primer router.")
+         return
+
+    print(f"\n=== Iniciando Proceso en Router: {datos_router.get('Device', 'Sin Nombre')} en {port} ===")
+    ser = conectar_router(port) 
+    
+    if not ser:
+        print("❌ Terminando proceso debido a fallo de conexión.")
         return
 
-    # Resto de la lógica (Lecura, Conexión, Configuración)
-    # ... (El resto del código es idéntico al anterior) ...
+    try:
+        # 1. Autenticar y elevar privilegios
+        autenticar(ser, datos_router)
+        
+        # 2. Iniciar el modo de control manual
+        modo_interactivo(ser)
+        
+        # OPCIONAL: Si quisieras ver la versión, harías esto en lugar de modo_interactivo:
+        # print("Versión del Router:")
+        # salida_version = send_command(ser, "show version")
+        # print(salida_version)
 
-    # 2. Lectura del CSV
-    with open(ruta_csv, newline="", encoding="utf-8") as f:
-        lector = list(csv.DictReader(f))
+    except Exception as e:
+        print(f"⚠️ Error durante el proceso: {e}")
 
-    if not lector:
-        print(f"ℹ El archivo '{ruta_csv}' está vacío. Terminando.")
-        return
+    finally:
+        if ser:
+            ser.close()
+            print(f"🔌 Conexión cerrada.")
 
-    resultados = []
-    puertos = set(row["Port"].strip() for row in lector if row.get("Port"))
-
-    for port in puertos:
-        print(f"\n=== Escaneando {port} ===")
-        ser = conectar_router(port) 
-        if not ser:
-            continue
-
-        try:
-            send_command(ser, "\r\n")
-            send_command(ser, "terminal length 0") 
-            salida = send_command(ser, "show version", espera=3.0)
-            modelo_detectado, version_detectada, serial_detectado = extraer_datos(salida)
-
-            print(f"🔎 Detectado en {port}: Serial={serial_detectado}, Modelo={modelo_detectado}, Versión={version_detectada}")
-
-            fila_coincidente = next((row for row in lector if row["Serie"].strip() == serial_detectado and row["Port"].strip() == port), None)
-
-            if fila_coincidente:
-                fila = fila_coincidente
-                modelo_coincide = fila.get("Modelo","").strip() == modelo_detectado
-                version_coincide = fila.get("Version","").strip() == version_detectada
-                
-                resultado_fila = {
-                    **fila, 
-                    "Serie_detectada": serial_detectado,
-                    "Modelo_detectado": modelo_detectado,
-                    "Version_detectada": version_detectada,
-                    "Modelo_coincide": "Sí" if modelo_coincide else "No",
-                    "Version_coincide": "Sí" if version_coincide else "No"
-                }
-                
-                if modelo_coincide and version_coincide:
-                    print(f"✅ Coincidencia total. Aplicando configuración a {fila['Device']}...")
-                    configurar_dispositivo(ser, fila)
-                    print(f"✅ Configuración finalizada.")
-                else:
-                    print(f"⚠ Coincidencia fallida. No se aplica configuración.")
-                
-                resultados.append(resultado_fila)
-            else:
-                print(f"❌ Serial {serial_detectado} detectado en {port} NO está registrado en el CSV. Se omite.")
-
-        except Exception as e:
-            print(f"⚠️ Error procesando {port} (revisar autenticación o estado del router): {e}")
-
-        finally:
-            if ser:
-                ser.close()
-                print(f"🔌 Conexión cerrada.")
-
-    if resultados:
-        campos = list(resultados[0].keys())
-        with open(ruta_resultados, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=campos)
-            writer.writeheader()
-            writer.writerows(resultados)
-        print(f"\n✅ Resultados de detección y validación guardados en {ruta_resultados}")
-    else:
-        print("\nℹ No se obtuvieron resultados para guardar.")
 
 # ==========================================================
 # 5. EJECUTAR SCRIPT
 # ==========================================================
 if __name__ == "__main__":
-    procesar_csv("modelos.csv")
+    procesar_routers_desde_excel("routers.xlsx")
